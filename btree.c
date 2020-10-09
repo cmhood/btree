@@ -24,15 +24,11 @@ struct Btree {
 
 struct Btree_Node {
 	/*
-	 * If `height` is 0, the node is a leaf and contains entries.  If
-	 * `height` is any other value, then the node contains children and
-	 * keys.
+	 * If the node has no children, it is a leaf node
 	 */
-	int height;
-	union {
-		size_t child_count;
-		size_t entry_count;
-	};
+	size_t child_count;
+	size_t entry_count;
+
 	/* Data is inserted at the end of the structure.
 	 *
 	 * For leaf nodes, the data is structured like this:
@@ -97,7 +93,7 @@ static struct Btree_Node *
 create_leaf(const struct Btree *restrict btree, size_t entry_count)
 {
 	struct Btree_Node *leaf = xmalloc(sizeof(struct Btree_Node) + btree->leaf_entry_count_max * btree->entry_size);
-	leaf->height = 0;
+	leaf->child_count = 0;
 	leaf->entry_count = entry_count;
 	return leaf;
 }
@@ -106,11 +102,11 @@ create_leaf(const struct Btree *restrict btree, size_t entry_count)
  * Creates a new branch node
  */
 static struct Btree_Node *
-create_branch(const struct Btree *restrict btree, int height, size_t child_count)
+create_branch(const struct Btree *restrict btree, size_t child_count)
 {
 	struct Btree_Node *branch = xmalloc(sizeof(struct Btree_Node) + btree->branch_child_count_max * sizeof(struct Btree_Node *) + (btree->branch_child_count_max - 1) * btree->entry_size);
-	branch->height = height;
 	branch->child_count = child_count;
+	branch->entry_count = 0;
 	return branch;
 }
 
@@ -136,7 +132,7 @@ btree_new(size_t branch_child_count_max, size_t leaf_entry_count_max, size_t ent
 static void
 free_node(struct Btree *restrict btree, struct Btree_Node *restrict node)
 {
-	if (node->height != 0) {
+	if (node->child_count != 0) {
 		for (size_t i = 0; i < node->child_count; i++) {
 			free_node(btree, *get_branch_child_ptr_ptr(btree, node, i));
 		}
@@ -242,7 +238,7 @@ branch_insert(const struct Btree *restrict btree, struct Btree_Node *restrict br
 static void *
 get_first_entry_ptr(const struct Btree *restrict btree, const struct Btree_Node *restrict node)
 {
-	while (node->height != 0)
+	while (node->child_count != 0)
 		node = *get_branch_child_ptr_ptr(btree, node, 0);
 	return get_leaf_entry_ptr(btree, node, 0);
 }
@@ -260,7 +256,7 @@ get_first_entry_ptr(const struct Btree *restrict btree, const struct Btree_Node 
 static struct Btree_Node *
 node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node, const void *restrict entry, const void *restrict *restrict key)
 {
-	if (node->height == 0) {
+	if (node->child_count == 0) {
 		/* If the leaf is full, split it in half */
 		if (node->entry_count == btree->leaf_entry_count_max) {
 			node->entry_count = btree->leaf_entry_count_max / 2;
@@ -302,7 +298,7 @@ node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node
 			size_t middle_index = node->child_count;
 			struct Btree_Node **middle_child_ptr_ptr = get_branch_child_ptr_ptr(btree, node, middle_index);
 
-			struct Btree_Node *new_branch = create_branch(btree, node->height, btree->branch_child_count_max - middle_index);
+			struct Btree_Node *new_branch = create_branch(btree, btree->branch_child_count_max - middle_index);
 			struct Btree_Node **new_branch_first_child_ptr_ptr = get_branch_child_ptr_ptr(btree, new_branch, 0);
 			memcpy(new_branch_first_child_ptr_ptr, middle_child_ptr_ptr, new_branch->child_count * sizeof(struct Btree_Node *) + (new_branch->child_count - 1) * btree->entry_size);
 
@@ -341,7 +337,7 @@ btree_insert(struct Btree *restrict btree, const void *restrict entry)
 		 * that contains the original root and the new node.
 		 */
 		struct Btree_Node *old_root = btree->root;
-		btree->root = create_branch(btree, old_root->height + 1, 2);
+		btree->root = create_branch(btree, 2);
 		*get_branch_child_ptr_ptr(btree, btree->root, 0) = old_root;
 		memcpy(get_branch_key_ptr(btree, btree->root, 1), key, btree->entry_size);
 		*get_branch_child_ptr_ptr(btree, btree->root, 1) = new_node;
@@ -364,10 +360,10 @@ indent(int i)
  * Prints out the contents of a node and its children
  */
 static void
-display_node(const struct Btree *restrict btree, const struct Btree_Node *restrict node, int max_height)
+display_node(const struct Btree *restrict btree, const struct Btree_Node *restrict node, int depth)
 {
-	indent(max_height - node->height);
-	if (node->height == 0) {
+	indent(depth);
+	if (node->child_count == 0) {
 		printf("%p -> [%lu]{ ", (void *) node, node->entry_count);
 		for (size_t i = 0; i < node->entry_count; i++) {
 			printf("%d ", *((int *) get_leaf_entry_ptr(btree, node, i)));
@@ -377,12 +373,12 @@ display_node(const struct Btree *restrict btree, const struct Btree_Node *restri
 		printf("%p -> [%lu]{\n", (void *) node, node->child_count);
 		for (size_t i = 0; i < node->child_count; i++) {
 			if (i != 0) {
-				indent(max_height - node->height + 1);
+				indent(depth + 1);
 				printf("(%d)\n", *((int *) get_branch_key_ptr(btree, node, i)));
 			}
-			display_node(btree, *get_branch_child_ptr_ptr(btree, node, i), max_height);
+			display_node(btree, *get_branch_child_ptr_ptr(btree, node, i), depth + 1);
 		}
-		indent(max_height - node->height);
+		indent(depth);
 		printf("}\n");
 	}
 }
@@ -393,5 +389,5 @@ display_node(const struct Btree *restrict btree, const struct Btree_Node *restri
 void
 btree_display(const struct Btree *btree)
 {
-	display_node(btree, btree->root, btree->root->height);
+	display_node(btree, btree->root, 0);
 }

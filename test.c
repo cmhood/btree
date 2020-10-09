@@ -647,11 +647,9 @@ main(int argc, char **argv)
 	}
 
 	struct Btree *btree = btree_new(atoi(argv[1]), atoi(argv[2]), sizeof(uint32_t), compare, NULL);
-	for (size_t j = 0; j < COUNT_OF(numbers) / 100; j++) {
-		for (size_t i = 0; i < COUNT_OF(numbers); i++) {
-			uint32_t nr = numbers[j] * 10000 + numbers[i];
-			btree_insert(btree, &nr);
-		}
+	for (size_t i = 0; i < COUNT_OF(numbers); i++) {
+		uint32_t nr = numbers[i];
+		btree_insert(btree, &nr);
 	}
 	btree_display(btree);
 
