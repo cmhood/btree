@@ -3,7 +3,7 @@
 #include "util.h"
 #include "btree.h"
 
-int
+static int
 compare(const void *a, const void *b, const void *cb_data)
 {
 	(void) cb_data;
