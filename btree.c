@@ -444,25 +444,24 @@ btree_insert(struct Btree *restrict btree, const void *restrict entry)
 }
 
 /*
- * Returns a pointer to the entry at the specific index
- * (`entry_index - offset`; `entry_index` is the index within the entire btree)
- * within the given subtree.  `*count` is set to the number of entries that
- * can be read from the returned pointer.
+ * Returns a pointer to the entry at a given index (`entry_index`) within a
+ * subtree.  `*count` is set to the number of entries that can be read from the
+ * returned pointer (as an array) and will be at least 1.
  */
 static const void *
-node_fetch(const struct Btree *restrict btree, const struct Btree_Node *restrict node, size_t offset, size_t entry_index, size_t *restrict count)
+node_fetch(const struct Btree *restrict btree, const struct Btree_Node *restrict node, size_t entry_index, size_t *restrict count)
 {
 	if (node->child_count == 0) {
-		*count = node->entry_count - (entry_index - offset);
-		return get_leaf_entry_ptr(btree, node, entry_index - offset);
+		*count = node->entry_count - entry_index;
+		return get_leaf_entry_ptr(btree, node, entry_index);
 	}
 
 	size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, node);
 	size_t i;
 	for (i = 0; i < node->child_count - 1; i++) {
-		if (cumulative_sizes[i] > entry_index - offset)
+		if (cumulative_sizes[i] > entry_index)
 			break;
-		if (cumulative_sizes[i] == entry_index - offset) {
+		if (cumulative_sizes[i] == entry_index) {
 			const struct Btree_Node *child = *get_branch_child_ptr_ptr(btree, node, i + 1);
 			while (child->child_count > 0)
 				child = *get_branch_child_ptr_ptr(btree, child, 0);
@@ -472,20 +471,20 @@ node_fetch(const struct Btree *restrict btree, const struct Btree_Node *restrict
 	}
 
 	if (i > 0)
-		offset += cumulative_sizes[i - 1];
-	return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, i), offset, entry_index, count);
+		entry_index -= cumulative_sizes[i - 1];
+	return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, i), entry_index, count);
 }
 
 /*
  * Retrieves an entry at a specific index.  Returns a pointer to the requested
  * entry.  `*count` is set to the number of entries that can be read from the
- * returned pointer, including the requested entry.  Make sure the function is
- * called with a valid index.
+ * returned pointer, including the requested entry, as an array, and will be at
+ * least 1.  Make sure the function is called with a valid index.
  */
 const void *
 btree_fetch(const struct Btree *restrict btree, size_t entry_index, size_t *restrict count)
 {
-	return node_fetch(btree, btree->root, 0, entry_index, count);
+	return node_fetch(btree, btree->root, entry_index, count);
 }
 
 /*
