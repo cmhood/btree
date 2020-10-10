@@ -1,16 +1,24 @@
 #include <stdio.h>
-#include <time.h>
 
 #include "util.h"
 #include "btree.h"
 
-#include "numbers.h"
+#include "data/numbers.h"
 
 static int
-compare(const void *a, const void *b, const void *cb_data)
+compare(const void *void_a, const void *void_b, const void *data)
 {
-	(void) cb_data;
-	return *((uint64_t *) b) - *((uint64_t *) a);
+	(void) data;
+	const uint64_t *a = void_a;
+	const uint64_t *b = void_b;
+	return *b - *a;
+}
+
+static void
+display(const void *entry)
+{
+	const uint64_t *num = entry;
+	printf("%lu", *num);
 }
 
 int
@@ -29,16 +37,14 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	srand(time(0));
-
 	struct Btree *btree = btree_new(branch_size, leaf_size, sizeof(uint64_t), compare, NULL);
 	for (size_t i = 0; i < count; i++) {
-		uint64_t nr = (test_numbers[i >> 16] << 16) + test_numbers[i & 65535];
+		uint64_t nr = (test_numbers[i >> 16] << 16) + test_numbers[i % ((size_t) 1 << 16)];
 		btree_insert(btree, &nr);
 	}
 
 	if (argc != 5)
-		btree_display(btree);
+		btree_display(btree, display);
 
 	btree_free(btree);
 }

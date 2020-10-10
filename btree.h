@@ -13,12 +13,15 @@ struct Btree;
  */
 typedef int Btree_Compare(const void *, const void *, const void *);
 
+typedef void Btree_Display_Entry(const void *);
+
 struct Btree *btree_new(size_t, size_t, size_t, Btree_Compare *, const void *);
 void btree_free(struct Btree *);
-void *btree_search(struct Btree *, void *);
-void btree_insert(struct Btree *, const void *);
-void btree_remove(struct Btree *, void *);
 
-void btree_display(const struct Btree *);
+void btree_insert(struct Btree *, const void *);
+
+const void *btree_fetch(const struct Btree *, size_t, size_t *);
+
+void btree_display(const struct Btree *, Btree_Display_Entry *);
 
 #endif

@@ -444,6 +444,51 @@ btree_insert(struct Btree *restrict btree, const void *restrict entry)
 }
 
 /*
+ * Returns a pointer to the entry at the specific index
+ * (`entry_index - offset`; `entry_index` is the index within the entire btree)
+ * within the given subtree.  `*count` is set to the number of entries that
+ * can be read from the returned pointer.
+ */
+static const void *
+node_fetch(const struct Btree *restrict btree, const struct Btree_Node *restrict node, size_t offset, size_t entry_index, size_t *restrict count)
+{
+	if (node->child_count == 0) {
+		*count = node->entry_count - (entry_index - offset);
+		return get_leaf_entry_ptr(btree, node, entry_index - offset);
+	}
+
+	size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, node);
+	size_t i;
+	for (i = 0; i < node->child_count - 1; i++) {
+		if (cumulative_sizes[i] > entry_index - offset)
+			break;
+		if (cumulative_sizes[i] == entry_index - offset) {
+			const struct Btree_Node *child = *get_branch_child_ptr_ptr(btree, node, i + 1);
+			while (child->child_count > 0)
+				child = *get_branch_child_ptr_ptr(btree, child, 0);
+			*count = child->entry_count;
+			return get_leaf_entry_ptr(btree, child, 0);
+		}
+	}
+
+	if (i > 0)
+		offset += cumulative_sizes[i - 1];
+	return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, i), offset, entry_index, count);
+}
+
+/*
+ * Retrieves an entry at a specific index.  Returns a pointer to the requested
+ * entry.  `*count` is set to the number of entries that can be read from the
+ * returned pointer, including the requested entry.  Make sure the function is
+ * called with a valid index.
+ */
+const void *
+btree_fetch(const struct Btree *restrict btree, size_t entry_index, size_t *restrict count)
+{
+	return node_fetch(btree, btree->root, 0, entry_index, count);
+}
+
+/*
  * Writes `i`-many tab characters to stdout
  */
 static void
@@ -459,27 +504,32 @@ indent(int i)
  * Prints out the contents of a node and its children
  */
 static void
-display_node(const struct Btree *restrict btree, const struct Btree_Node *restrict node, int depth)
+display_node(const struct Btree *restrict btree, const struct Btree_Node *restrict node, int depth, Btree_Display_Entry *display_entry)
 {
 	indent(depth);
 	if (node->child_count == 0) {
 		printf(". -> [%lu entries]{ ", node->entry_count);
 		for (size_t i = 0; i < node->entry_count; i++) {
-			printf("%lu ", *((uint64_t *) get_leaf_entry_ptr(btree, node, i)));
-			if (i > 16) {
-				printf("... ");
-				break;
+			display_entry(get_leaf_entry_ptr(btree, node, i));
+			if (i + 1 < node->entry_count) {
+				printf("    ");
+				if (i > 16) {
+					printf("... ");
+					break;
+				}
 			}
 		}
-		printf("}\n");
+		printf(" }\n");
 	} else {
 		printf(". -> [%lu children, %lu entries]{\n", node->child_count, node->entry_count);
 		for (size_t i = 0; i < node->child_count; i++) {
 			if (i != 0) {
 				indent(depth + 1);
-				printf("(%lu)\n", *((uint64_t *) get_branch_key_ptr(btree, node, i)));
+				printf("(");
+				display_entry(get_branch_key_ptr(btree, node, i));
+				printf(")\n");
 			}
-			display_node(btree, *get_branch_child_ptr_ptr(btree, node, i), depth + 1);
+			display_node(btree, *get_branch_child_ptr_ptr(btree, node, i), depth + 1, display_entry);
 			if (i + 1 < node->child_count) {
 				indent(depth + 1);
 				printf("[%lu cumulative entries]\n", get_branch_cumulative_sizes(btree, node)[i]);
@@ -494,8 +544,8 @@ display_node(const struct Btree *restrict btree, const struct Btree_Node *restri
  * Prints out the contents of a btree in a human-readable format.  For debugging purposes.
  */
 void
-btree_display(const struct Btree *btree)
+btree_display(const struct Btree *btree, Btree_Display_Entry *display_entry)
 {
 	printf("Btree contains %lu entries\n", btree->entry_count);
-	display_node(btree, btree->root, 0);
+	display_node(btree, btree->root, 0, display_entry);
 }

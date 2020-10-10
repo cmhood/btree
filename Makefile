@@ -3,21 +3,25 @@
 PROG_CFLAGS=-D_DEFAULT_SOURCE ${CFLAGS}
 PROG_LDFLAGS=${LDFLAGS}
 
-OBJ=btree.o test.o util.o
+OBJ=btree.o util.o
 
-default: test
+default: test1 test2
 
 btree.o: btree.h util.h
-test.o: btree.h util.h
+test1.o: btree.h util.h
+test2.o: btree.h util.h
 util.o: util.h
 
 .c.o:
 	${CC} -c $< -o $@ ${PROG_CFLAGS}
 
-test: ${OBJ}
-	${CC} ${OBJ} -o $@ ${PROG_LDFLAGS}
+test1: test1.o ${OBJ}
+	${CC} test1.o ${OBJ} -o $@ ${PROG_LDFLAGS}
+
+test2: test2.o ${OBJ}
+	${CC} test2.o ${OBJ} -o $@ ${PROG_LDFLAGS}
 
 clean:
-	rm -f test *.o
+	rm -f test1 test2 *.o
 
 .PHONY: default clean
