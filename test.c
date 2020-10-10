@@ -37,7 +37,7 @@ main(int argc, char **argv)
 		btree_insert(btree, &nr);
 	}
 
-	if (argc == 5)
+	if (argc != 5)
 		btree_display(btree);
 
 	btree_free(btree);
