@@ -279,18 +279,6 @@ get_first_entry_ptr(const struct Btree /*restrict */*btree, const struct Btree_N
 }
 
 /*
- * Finds the sum of the entry counts of each of a branch's children
- */
-static size_t
-get_branch_entry_count_from_children(const struct Btree /*restrict */*btree, const struct Btree_Node /*restrict */*branch)
-{
-	size_t sum = 0;
-	for (size_t i = 0; i < branch->child_count; i++)
-		sum += (*get_branch_child_ptr_ptr(btree, branch, i))->entry_count;
-	return sum;
-}
-
-/*
  * Inserts an entry into a btree node.  If the node is a branch, then this
  * function will recurse on itself to find a leaf.  If the specified node
  * is full, then this function will split the node into two, and the newly
@@ -357,10 +345,14 @@ node_insert(const struct Btree /*restrict */*btree, struct Btree_Node /*restrict
 			struct Btree_Node **new_branch_first_child_ptr_ptr = get_branch_child_ptr_ptr(btree, new_branch, 0);
 			memcpy(new_branch_first_child_ptr_ptr, middle_child_ptr_ptr, new_branch->child_count * sizeof(struct Btree_Node *) + (new_branch->child_count - 1) * btree->entry_size);
 
-			/* Set cumulative entry counts for the new branch */
-			size_t offset = get_branch_cumulative_sizes(btree, node)[middle_index - 1];
+			/* Update entry counts */
+			size_t tmp = node->entry_count;
+			node->entry_count = get_branch_cumulative_sizes(btree, node)[middle_index - 1];
+			new_branch->entry_count = tmp - node->entry_count;
+
+			/* Set cumulative entry count array for the new branch */
 			for (size_t i = 0; i < new_branch->child_count - 1; i++)
-				get_branch_cumulative_sizes(btree, new_branch)[i] = get_branch_cumulative_sizes(btree, node)[middle_index + i] - offset;
+				get_branch_cumulative_sizes(btree, new_branch)[i] = get_branch_cumulative_sizes(btree, node)[middle_index + i] - node->entry_count;
 
 			/*
 			 * Now insert the new child, `new_child`, into the same
@@ -375,6 +367,12 @@ node_insert(const struct Btree /*restrict */*btree, struct Btree_Node /*restrict
 					cumulative_sizes[child_index] += cumulative_sizes[child_index - 1];
 
 				branch_insert(btree, node, *key, new_child_index, new_child);
+
+				/*
+				 * We haven't incremented the entry count from
+				 * the insertion yet, so do it now.
+				 */
+				node->entry_count++;
 			} else {
 				/* Insert into `new_branch` */
 
@@ -387,10 +385,13 @@ node_insert(const struct Btree /*restrict */*btree, struct Btree_Node /*restrict
 					cumulative_sizes[new_branch_child_index] += cumulative_sizes[new_branch_child_index - 1];
 
 				branch_insert(btree, new_branch, *key, new_branch_new_child_index, new_child);
-			}
 
-			node->entry_count = get_branch_entry_count_from_children(btree, node);
-			new_branch->entry_count = get_branch_entry_count_from_children(btree, new_branch);
+				/*
+				 * We haven't incremented the entry count from
+				 * the insertion yet, so do it now.
+				 */
+				new_branch->entry_count++;
+			}
 
 			*key = get_first_entry_ptr(btree, new_branch);
 			return new_branch;
