@@ -15,6 +15,8 @@ struct Btree {
 	size_t leaf_entry_count_max;
 	/* The size of each leaf entry, in bytes */
 	size_t entry_size;
+	/* The number of entries in the entire btree */
+	size_t entry_count;
 
 	Btree_Compare *compare;
 	const void *compare_cb_data;
@@ -102,16 +104,18 @@ create_leaf(const struct Btree *restrict btree, size_t entry_count)
  * Creates a new branch node
  */
 static struct Btree_Node *
-create_branch(const struct Btree *restrict btree, size_t child_count)
+create_branch(const struct Btree *restrict btree, size_t child_count, size_t entry_count)
 {
 	struct Btree_Node *branch = xmalloc(sizeof(struct Btree_Node) + btree->branch_child_count_max * sizeof(struct Btree_Node *) + (btree->branch_child_count_max - 1) * btree->entry_size);
 	branch->child_count = child_count;
-	branch->entry_count = 0;
+	branch->entry_count = entry_count;
 	return branch;
 }
 
 /*
- * Creates a new btree.  `branch_child_count_max` and `leaf_entry_count_max` must each be >= 2.
+ * Creates a new btree.  `branch_child_count_max` and `leaf_entry_count_max`
+ * can be as small as 2, but in practice they should be at least an order of
+ * magnitude larger than that.
  */
 struct Btree *
 btree_new(size_t branch_child_count_max, size_t leaf_entry_count_max, size_t entry_size, Btree_Compare *compare, const void *compare_cb_data)
@@ -233,7 +237,7 @@ branch_insert(const struct Btree *restrict btree, struct Btree_Node *restrict br
 }
 
 /*
- * Gets a pointer to the first entry in a subtree
+ * Gets a pointer to the first entry in a node
  */
 static void *
 get_first_entry_ptr(const struct Btree *restrict btree, const struct Btree_Node *restrict node)
@@ -241,6 +245,18 @@ get_first_entry_ptr(const struct Btree *restrict btree, const struct Btree_Node 
 	while (node->child_count != 0)
 		node = *get_branch_child_ptr_ptr(btree, node, 0);
 	return get_leaf_entry_ptr(btree, node, 0);
+}
+
+/*
+ * Finds the sum of the entry counts of each of a branch's children
+ */
+static size_t
+get_branch_entry_count_from_children(const struct Btree *restrict btree, const struct Btree_Node *restrict branch)
+{
+	size_t sum = 0;
+	for (size_t i = 0; i < branch->child_count; i++)
+		sum += (*get_branch_child_ptr_ptr(btree, branch, i))->entry_count;
+	return sum;
 }
 
 /*
@@ -264,7 +280,7 @@ node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node
 			void *middle_entry = get_leaf_entry_ptr(btree, node, middle_index);
 
 			struct Btree_Node *new_leaf = create_leaf(btree, btree->leaf_entry_count_max - middle_index);
-			void *leaf_entries_start  = get_leaf_entry_ptr(btree, new_leaf, 0);
+			void *leaf_entries_start = get_leaf_entry_ptr(btree, new_leaf, 0);
 			memcpy(leaf_entries_start, middle_entry, new_leaf->entry_count * btree->entry_size);
 
 			/* Now insert the new entry */
@@ -298,7 +314,7 @@ node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node
 			size_t middle_index = node->child_count;
 			struct Btree_Node **middle_child_ptr_ptr = get_branch_child_ptr_ptr(btree, node, middle_index);
 
-			struct Btree_Node *new_branch = create_branch(btree, btree->branch_child_count_max - middle_index);
+			struct Btree_Node *new_branch = create_branch(btree, btree->branch_child_count_max - middle_index, 0);
 			struct Btree_Node **new_branch_first_child_ptr_ptr = get_branch_child_ptr_ptr(btree, new_branch, 0);
 			memcpy(new_branch_first_child_ptr_ptr, middle_child_ptr_ptr, new_branch->child_count * sizeof(struct Btree_Node *) + (new_branch->child_count - 1) * btree->entry_size);
 
@@ -313,13 +329,16 @@ node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node
 				branch_insert(btree, new_branch, *key, new_child_index, new_child);
 			}
 
+			node->entry_count = get_branch_entry_count_from_children(btree, node);
+			new_branch->entry_count = get_branch_entry_count_from_children(btree, new_branch);
+
 			*key = get_first_entry_ptr(btree, new_branch);
 			return new_branch;
 		}
 
 		branch_insert(btree, node, *key, child_index + 1, new_child);
 	}
-	
+	node->entry_count++;
 	return NULL;
 }
 
@@ -337,11 +356,12 @@ btree_insert(struct Btree *restrict btree, const void *restrict entry)
 		 * that contains the original root and the new node.
 		 */
 		struct Btree_Node *old_root = btree->root;
-		btree->root = create_branch(btree, 2);
+		btree->root = create_branch(btree, 2, old_root->entry_count + new_node->entry_count);
 		*get_branch_child_ptr_ptr(btree, btree->root, 0) = old_root;
 		memcpy(get_branch_key_ptr(btree, btree->root, 1), key, btree->entry_size);
 		*get_branch_child_ptr_ptr(btree, btree->root, 1) = new_node;
 	}
+	btree->entry_count++;
 }
 
 /*
@@ -364,17 +384,16 @@ display_node(const struct Btree *restrict btree, const struct Btree_Node *restri
 {
 	indent(depth);
 	if (node->child_count == 0) {
-		printf("%p -> [%lu]{ ", (void *) node, node->entry_count);
-		for (size_t i = 0; i < node->entry_count; i++) {
-			printf("%d ", *((int *) get_leaf_entry_ptr(btree, node, i)));
-		}
+		printf("%p -> [%lu entries]{ ", (void *) node, node->entry_count);
+		for (size_t i = 0; i < node->entry_count; i++)
+			printf("%lu ", *((uint64_t *) get_leaf_entry_ptr(btree, node, i)));
 		printf("}\n");
 	} else {
-		printf("%p -> [%lu]{\n", (void *) node, node->child_count);
+		printf("%p -> [%lu children, %lu entries]{\n", (void *) node, node->child_count, node->entry_count);
 		for (size_t i = 0; i < node->child_count; i++) {
 			if (i != 0) {
 				indent(depth + 1);
-				printf("(%d)\n", *((int *) get_branch_key_ptr(btree, node, i)));
+				printf("(%lu)\n", *((uint64_t *) get_branch_key_ptr(btree, node, i)));
 			}
 			display_node(btree, *get_branch_child_ptr_ptr(btree, node, i), depth + 1);
 		}
@@ -389,5 +408,6 @@ display_node(const struct Btree *restrict btree, const struct Btree_Node *restri
 void
 btree_display(const struct Btree *btree)
 {
+	printf("Btree contains %lu entries\n", btree->entry_count);
 	display_node(btree, btree->root, 0);
 }
