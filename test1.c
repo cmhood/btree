@@ -3,7 +3,7 @@
 #include "util.h"
 #include "btree.h"
 
-#include "data/numbers.h"
+#include "test_data/numbers.h"
 
 static int
 compare(const void *void_a, const void *void_b, const void *data)
@@ -32,7 +32,7 @@ main(int argc, char **argv)
 	size_t branch_size = atol(argv[1]);
 	size_t leaf_size = atol(argv[2]);
 	size_t count = atol(argv[3]);
-	if (branch_size < 2 || leaf_size < 2 || !(0 < count && count <= (size_t) 65536 * 65536)) {
+	if (branch_size < 4 || leaf_size < 2 || !(0 < count && count <= (size_t) 65536 * 65536)) {
 		fprintf(stderr, "Invalid argv\n");
 		return EXIT_FAILURE;
 	}

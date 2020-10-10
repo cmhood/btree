@@ -4,7 +4,7 @@
 #include "util.h"
 #include "btree.h"
 
-#include "data/people.h"
+#include "test_data/people.h"
 
 static int
 compare(const void *void_a, const void *void_b, const void *data)
@@ -38,7 +38,7 @@ main(int argc, char **argv)
 	size_t branch_size = atol(argv[1]);
 	size_t leaf_size = atol(argv[2]);
 	size_t count = atol(argv[3]);
-	if (branch_size < 2 || leaf_size < 2 || !(0 <= count && count <= COUNT_OF(test_people))) {
+	if (branch_size < 4 || leaf_size < 2 || !(0 <= count && count <= COUNT_OF(test_people))) {
 		fprintf(stderr, "Invalid argv\n");
 		return EXIT_FAILURE;
 	}
@@ -50,9 +50,9 @@ main(int argc, char **argv)
 	btree_display(btree, display);
 
 	for (size_t i = 0; i < count; i++) {
-		printf("[%lu] = ", i);
 		size_t count;
 		const struct Person *person = btree_fetch(btree, i, &count);
+		printf("[%lu] = ", i);
 		display_person(person);
 		printf("    (%lu contiguous)\n", count);
 	}

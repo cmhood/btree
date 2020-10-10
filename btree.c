@@ -138,9 +138,11 @@ create_branch(const struct Btree *restrict btree, size_t child_count, size_t ent
 }
 
 /*
- * Creates a new btree.  `branch_child_count_max` and `leaf_entry_count_max`
- * can be as small as 2, but in practice they should be at least an order of
- * magnitude larger than that.
+ * Creates a new btree.  `branch_child_count_max` must be at least 4.
+ * `leaf_entry_count_max` must be at least 2.  In practice, both of these
+ * values will be significantly larger than those minima, and
+ * `leaf_entry_count_max` should probably be greater than
+ * `branch_child_count_max` for best performance.
  */
 struct Btree *
 btree_new(size_t branch_child_count_max, size_t leaf_entry_count_max, size_t entry_size, Btree_Compare *compare, const void *compare_cb_data)
@@ -457,22 +459,37 @@ node_fetch(const struct Btree *restrict btree, const struct Btree_Node *restrict
 	}
 
 	size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, node);
-	size_t i;
-	for (i = 0; i < node->child_count - 1; i++) {
-		if (cumulative_sizes[i] > entry_index)
-			break;
-		if (cumulative_sizes[i] == entry_index) {
-			const struct Btree_Node *child = *get_branch_child_ptr_ptr(btree, node, i + 1);
+	size_t low_index = 0;
+	size_t high_index = node->child_count;
+	while (low_index != high_index) {
+		size_t middle_index = (low_index + high_index) / 2;
+
+		size_t middle_size;
+		if (middle_index == node->child_count - 1) {
+			if (low_index == middle_index)
+				return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, middle_index), entry_index - cumulative_sizes[node->child_count - 2], count);
+			middle_size = node->entry_count;
+		} else {
+			middle_size = cumulative_sizes[middle_index];
+		}
+
+		if (middle_size > entry_index) {
+			high_index = middle_index;
+		} else if (middle_size == entry_index) {
+			const struct Btree_Node *child = *get_branch_child_ptr_ptr(btree, node, middle_index + 1);
 			while (child->child_count > 0)
 				child = *get_branch_child_ptr_ptr(btree, child, 0);
 			*count = child->entry_count;
 			return get_leaf_entry_ptr(btree, child, 0);
+		} else {
+			low_index = middle_index + 1;
 		}
 	}
 
-	if (i > 0)
-		entry_index -= cumulative_sizes[i - 1];
-	return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, i), entry_index, count);
+	size_t child_index = low_index;
+	if (child_index > 0)
+		entry_index -= cumulative_sizes[child_index - 1];
+	return node_fetch(btree, *get_branch_child_ptr_ptr(btree, node, child_index), entry_index, count);
 }
 
 /*
