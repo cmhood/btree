@@ -279,6 +279,22 @@ get_first_entry_ptr(const struct Btree *restrict btree, const struct Btree_Node 
 }
 
 /*
+ * Updates the value of the cumulative size array at a specified index.
+ * `entry_count` should refer to the number of entries of the child at
+ * the specified index.  The value in the cumulative size array is set
+ * to `entry_count`, plus the value of the preceding element, unless
+ * `index` is 0.
+ */
+static void
+update_branch_cumulative_size_at_index(const struct Btree *restrict btree, const struct Btree_Node *restrict branch, size_t index, size_t entry_count)
+{
+	size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, branch);
+	cumulative_sizes[index] = entry_count;
+	if (index > 0)
+		cumulative_sizes[index] += cumulative_sizes[index - 1];
+}
+
+/*
  * Inserts an entry into a btree node.  If the node is a branch, then this
  * function will recurse on itself to find a leaf.  If the specified node
  * is full, then this function will split the node into two, and the newly
@@ -355,54 +371,44 @@ node_insert(const struct Btree *restrict btree, struct Btree_Node *restrict node
 				get_branch_cumulative_sizes(btree, new_branch)[i] = get_branch_cumulative_sizes(btree, node)[middle_index + i] - node->entry_count;
 
 			/*
-			 * Now insert the new child, `new_child`, into the same
-			 * branch as `*child_ptr_ptr`
+			 * Determine which of the two branches `new_child`
+			 * should be inserted into.
 			 */
+			struct Btree_Node *target_branch;
 			if (child_index < middle_index) {
-				/* Insert into `node` */
-
-				size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, node);
-				cumulative_sizes[child_index] = (*child_ptr_ptr)->entry_count;
-				if (child_index > 0)
-					cumulative_sizes[child_index] += cumulative_sizes[child_index - 1];
-
-				branch_insert(btree, node, *key, new_child_index, new_child);
-
-				/*
-				 * We haven't incremented the entry count from
-				 * the insertion yet, so do it now.
-				 */
-				node->entry_count++;
+				target_branch = node;
 			} else {
-				/* Insert into `new_branch` */
-
-				size_t new_branch_child_index = child_index - middle_index;
-				size_t new_branch_new_child_index = new_child_index - middle_index;
-
-				size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, new_branch);
-				cumulative_sizes[new_branch_child_index] = (*child_ptr_ptr)->entry_count;
-				if (new_branch_child_index > 0)
-					cumulative_sizes[new_branch_child_index] += cumulative_sizes[new_branch_child_index - 1];
-
-				branch_insert(btree, new_branch, *key, new_branch_new_child_index, new_child);
-
-				/*
-				 * We haven't incremented the entry count from
-				 * the insertion yet, so do it now.
-				 */
-				new_branch->entry_count++;
+				target_branch = new_branch;
+				child_index -= middle_index;
+				new_child_index -= middle_index;
 			}
+
+			/* Update the cumulative entry count at `child_index` */
+			update_branch_cumulative_size_at_index(btree, target_branch, child_index, (*child_ptr_ptr)->entry_count);
+
+			/*
+			 * Insert the new child.  This will also update the
+			 * rest of the cumulative size array.
+			 */
+			branch_insert(btree, target_branch, *key, new_child_index, new_child);
+
+			/*
+			 * We haven't incremented the entry count from
+			 * the insertion yet, so do it now
+			 */
+			target_branch->entry_count++;
 
 			*key = get_first_entry_ptr(btree, new_branch);
 			return new_branch;
 		}
 
-		size_t *cumulative_sizes = get_branch_cumulative_sizes(btree, node);
-		cumulative_sizes[child_index] = (*child_ptr_ptr)->entry_count;
-		if (child_index > 0)
-			cumulative_sizes[child_index] += cumulative_sizes[child_index - 1];
+		/* Update the cumulative entry count at `child_index` */
+		update_branch_cumulative_size_at_index(btree, node, child_index, (*child_ptr_ptr)->entry_count);
 
-		/* Insert new child */
+		/*
+		 * Insert the new child.  This will also update the rest of the
+		 * cumulative size array.
+		 */
 		branch_insert(btree, node, *key, new_child_index, new_child);
 	} else {
 		/* Update the cumulative sizes array */
